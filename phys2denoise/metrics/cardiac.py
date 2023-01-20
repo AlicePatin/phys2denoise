@@ -60,6 +60,84 @@ def crf(samplerate, oversampling=50, time_length=32, onset=0.0, tr=2.0):
     crf_arr = crf_arr / max(abs(crf_arr))
     return crf_arr
 
+@due.dcite(references.CHEN_LEWIS_2020)
+def hbi(card, samplerate, window=6):
+    """Calculate the median heart beats interval (HBI) in a sliding window.
+
+    Parameters
+    ----------
+    card : (X,) :obj:`Physio`
+        A Physio object with the following parameters: the heart peaks index, card.peaks, and card.data, the ppg values.
+    samplerate : :obj:`float`
+        Sampling rate for card, in Hertz.
+    window : :obj:`int`, optional
+        Size of the sliding window, in seconds.
+        By default at 6.
+
+    Returns
+    -------
+    hbi_out : (X, 2) :obj:`numpy.ndarray`
+        Median of heart beats interval values.
+        The first column is raw HBI values, after normalization.
+        The second column is HBI values convolved with the RRF, after normalization.
+
+    Notes
+    -----
+    Heart beats interval (HBI) was introduced in [1]_, and consists of the
+    average of the time interval between two heart beats based on ppg data within a 6-second window.
+
+    This metric is often lagged back and/or forward in time and convolved with
+    an inverse of the cardiac response function before being included in a GLM.
+    Regressors also often have mean and linear trends removed and are
+    standardized prior to regressions.
+
+    References
+    ----------
+    .. [1] J. E. Chen & L. D. Lewis, "Resting-state "physiological networks"", Neuroimage, 
+        vol. 213, pp. 116707, 2020.
+    
+      
+    """
+   
+    # Convert window to time points
+    size = card.data.shape[0] 
+    window_tp = int(window * samplerate) 
+    hbi_arr = np.empty(size)
+    
+    for i in range(size):
+        if i==0 or i==(size-1):
+            print(i)
+            window_tp = 0
+    
+        elif i<120:
+            print(i)
+            window_tp = i * 2 * samplerate 
+    
+        elif i>(size-1-120):
+            print(i)
+            window_tp = (size - 1 - i) * 2 * samplerate
+            
+        else:
+            window_tp = window
+        
+        peaks = card.peaks[(card.peaks >= (i-window_tp/2)) & (card.peaks <= (i+window_tp/2))]
+        hbi_arr[i] = np.ediff1d(peaks).median()
+
+    # Convolve with crf
+    crf_arr = crf(samplerate, oversampling=50)
+    icrf_arr = - crf_arr
+    hbi_convolved = convolve1d(hbi_arr, icrf_arr, axis=0)
+
+    # Concatenate the raw and convolved versions
+    hbi_combined = np.stack((hbi_arr, hbi_convolved), axis=-1)
+
+    # Detrend and normalize
+    hbi_combined = hbi_combined - np.mean(hbi_combined, axis=0)
+    hbi_combined = detrend(hbi_combined, axis=0)
+    hbi_out = zscore(hbi_combined, axis=0)
+    return hbi_out
+
+
 
 def cardiac_phase(peaks, sample_rate, slice_timings, n_scans, t_r):
     """Calculate cardiac phase from cardiac peaks.
